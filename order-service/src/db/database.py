@@ -1,0 +1,44 @@
+import sqlite3
+from contextlib import contextmanager
+from pathlib import Path
+
+from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_fixed
+
+from src.settings.config import get_settings
+
+
+def retry_db(func):
+    return retry(
+        stop=stop_after_attempt(3),
+        wait=wait_fixed(0.2),
+        retry=retry_if_exception_type(sqlite3.OperationalError),
+        reraise=True,
+    )(func)
+
+
+@contextmanager
+def session():
+    settings = get_settings()
+    path = Path(settings.database_path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    connection = sqlite3.connect(path)
+    connection.row_factory = sqlite3.Row
+    try:
+        yield connection
+        connection.commit()
+    finally:
+        connection.close()
+
+
+@retry_db
+def init_db():
+    with session() as connection:
+        connection.execute(
+            "CREATE TABLE IF NOT EXISTS orders ("
+            "id INTEGER PRIMARY KEY AUTOINCREMENT, "
+            "user_id INTEGER NOT NULL, "
+            "item TEXT NOT NULL, "
+            "amount REAL NOT NULL, "
+            "status TEXT NOT NULL, "
+            "notification_sent INTEGER NOT NULL DEFAULT 0)"
+        )
